@@ -1,4 +1,4 @@
-use std::ops::{Add, Div, Mul, Sub, Neg};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use image::{ImageBuffer, ImageFormat, Pixel, Rgba, RgbaImage};
 
@@ -110,21 +110,39 @@ trait Reflect {
 }
 
 trait Draw {
-    fn draw(&self, incident: &Vec3, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
-        self.draw_color(incident, img, &Rgba([255, 255, 255, 255]));
-    }
-    fn draw_color(&self, incident: &Vec3, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, color: &Rgba<u8>);
+    fn draw(&self, setting: &Setting, material: &Material, img: &mut RgbaImage);
 }
 
 impl<T: Reflect> Draw for T {
-    fn draw_color(&self, incident: &Vec3, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, color: &Rgba<u8>) {
+    fn draw(
+        &self,
+        setting: &Setting,
+        material: &Material,
+        img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) {
+        let (w, h) = img.dimensions();
         for (x, y, px) in img.enumerate_pixels_mut() {
-            if let Some((df, sp, alpha)) = self.reflect(&Vec3::new(x as f64, y as f64, 0.), incident, &Vec3::new(x as f64 / 10., y as f64 / 10., -1.).normal()) {
-                let df = 0.3 * df + 0.8;
-                let r = (color[0] as f64 * df + 255. * sp.powi(2)).min(255.) as u8;
-                let g = (color[1] as f64 * df + 255. * sp.powi(2)).min(255.) as u8;
-                let b = (color[2] as f64 * df + 255. * sp.powi(2)).min(255.) as u8;
-                let a = (color[3] as f64 * alpha).min(255.) as u8;
+            if let Some((df, sp, alpha)) = self.reflect(
+                &Vec3::new(x as f64, y as f64, 0.),
+                &setting.incident,
+                &Vec3::new(
+                    x as f64 - w as f64 / 2.,
+                    y as f64 - h as f64 / 2.,
+                    -(setting.distance as f64),
+                )
+                .normal(),
+            ) {
+                let df = 0.3 * df + setting.ambient_brightness;
+                let r = (material.color[0] as f64 * df
+                    + material.reflection_brightness * 255. * sp.powi(material.shininess))
+                .min(255.) as u8;
+                let g = (material.color[1] as f64 * df
+                    + material.reflection_brightness * 255. * sp.powi(material.shininess))
+                .min(255.) as u8;
+                let b = (material.color[2] as f64 * df
+                    + material.reflection_brightness * 255. * sp.powi(material.shininess))
+                .min(255.) as u8;
+                let a = (material.color[3] as f64 * alpha).min(255.) as u8;
                 px.blend(&Rgba([r, g, b, a]));
             }
         }
@@ -132,13 +150,12 @@ impl<T: Reflect> Draw for T {
 }
 
 impl<E: Draw> Draw for Vec<E> {
-    fn draw_color(&self, incident: &Vec3, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, color: &Rgba<u8>) {
+    fn draw(&self, setting: &Setting, material: &Material, img: &mut RgbaImage) {
         for e in self {
-            e.draw_color(incident, img, color);
+            e.draw(setting, material, img);
         }
     }
 }
-
 
 struct Corn {
     center: Vec3,
@@ -192,15 +209,15 @@ impl Reflect for RoundBox {
         let (rim_x, rim_y) = if p.x <= self.top_left.x {
             if p.y <= self.top_left.y {
                 (self.top_left.x, self.top_left.y)
-            } else if p.y <= self.bottom_right.y {
+            } else if p.y < self.bottom_right.y {
                 (self.top_left.x, p.y)
             } else {
                 (self.top_left.x, self.bottom_right.y)
             }
-        } else if p.x <= self.bottom_right.x {
+        } else if p.x < self.bottom_right.x {
             if p.y <= self.top_left.y {
                 (p.x, self.top_left.y)
-            } else if p.y <= self.bottom_right.y {
+            } else if p.y < self.bottom_right.y {
                 (p.x, p.y)
             } else {
                 (p.x, self.bottom_right.y)
@@ -208,7 +225,7 @@ impl Reflect for RoundBox {
         } else {
             if p.y <= self.top_left.y {
                 (self.bottom_right.x, self.top_left.y)
-            } else if p.y <= self.bottom_right.y {
+            } else if p.y < self.bottom_right.y {
                 (self.bottom_right.x, p.y)
             } else {
                 (self.bottom_right.x, self.bottom_right.y)
@@ -223,59 +240,125 @@ impl Reflect for RoundBox {
     }
 }
 
+struct Object<T: Draw> {
+    shape: T,
+    material: Material,
+}
+
+#[derive(Clone)]
+struct Material {
+    color: Rgba<u8>,
+    shininess: i32,
+    reflection_brightness: f64,
+}
+
+struct Setting {
+    distance: u32,
+    incident: Vec3,
+    ambient_brightness: f64,
+}
+
+impl<T: Draw> Object<T> {
+    fn draw(&self, setting: &Setting, img: &mut RgbaImage) {
+        self.shape.draw(setting, &self.material, img);
+    }
+}
+
+trait IntoObject {
+    type Shape: Draw;
+    fn with(self, material: Material) -> Object<Self::Shape>;
+}
+
+impl<T: Draw> IntoObject for T {
+    type Shape = T;
+    fn with(self, material: Material) -> Object<Self::Shape> {
+        Object {
+            shape: self,
+            material,
+        }
+    }
+}
+
 fn main() {
+    let setting = Setting {
+        incident: Vec3::new(0.2, 1., -0.2),
+        ambient_brightness: 0.8,
+        distance: 30,
+    };
+    let white = Material {
+        color: Rgba([255, 255, 255, 255]),
+        shininess: 2,
+        reflection_brightness: 1.,
+    };
+    let black = Material {
+        color: Rgba([0, 0, 0, 255]),
+        shininess: 2,
+        reflection_brightness: 1.,
+    };
+
     let rim = Corn {
         center: point(150., 150.),
         radius: 150.,
         height: 450.,
-    };
+    }
+    .with(white.clone());
     let top = Concave {
         center: point(150., 150.),
         radius: 130.,
         depth: 30.,
-    };
+    }
+    .with(white.clone());
     let tip_rim = Corn {
         center: point(215., 85.),
         radius: 20.,
-        height: -30.
-    };
+        height: -30.,
+    }
+    .with(white.clone());
     let tip = Concave {
         center: point(215., 85.),
         radius: 15.,
-        depth: 2.,
-    };
-    let incident = Vec3::new(-0.5, 1., -1.).normal();
+        depth: 5.,
+    }
+    .with(black.clone());
     let mut img = RgbaImage::new(300, 300);
-    rim.draw(&incident, &mut img);
-    top.draw(&incident, &mut img);
-    tip_rim.draw(&incident, &mut img);
-    tip.draw_color(&incident, &mut img, &Rgba([50,50,50,255]));
+    rim.draw(&setting, &mut img);
+    top.draw(&setting, &mut img);
+    tip_rim.draw(&setting, &mut img);
+    tip.draw(&setting, &mut img);
     img.save_with_format("out.png", ImageFormat::Png).unwrap();
     let rim = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(250., 100.),
         border_radius: 40.,
         depth: -40.,
-    };
+    }
+    .with(white.clone());
     let trace = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(250., 100.),
         border_radius: 25.,
         depth: 25.,
+    }
+    .with(white.clone());
+    let blue = Material {
+        color: Rgba([179, 220, 214, 255]),
+        ..black
     };
     let slider = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(150., 100.),
         border_radius: 20.,
         depth: -20.,
-    };
+    }
+    .with(blue.clone());
     let top = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(150., 100.),
         border_radius: 15.,
-        depth: 5.
-    };
-    let tips: Vec<_> = (-1..=1)
+        depth: 5.,
+    }
+    .with(blue.clone());
+    let tips = (-1..=1)
         .into_iter()
         .map(|i| RoundBox {
             top_left: point(100. + 12. * i as f64, 90.),
@@ -283,13 +366,13 @@ fn main() {
             border_radius: 4.,
             depth: -4.,
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .with(blue.clone());
     let mut img = RgbaImage::new(300, 200);
-    rim.draw(&incident, &mut img);
-    trace.draw(&incident, &mut img);
-    let slider_color = Rgba([10, 10, 10, 255]);
-    slider.draw_color(&incident, &mut img, &slider_color);
-    top.draw_color(&incident, &mut img, &slider_color);
-    tips.draw_color(&incident, &mut img, &slider_color);
+    rim.draw(&setting, &mut img);
+    trace.draw(&setting, &mut img);
+    slider.draw(&setting, &mut img);
+    top.draw(&setting, &mut img);
+    tips.draw(&setting, &mut img);
     img.save_with_format("out2.png", ImageFormat::Png).unwrap();
 }
