@@ -283,17 +283,23 @@ fn main() {
     let setting = Setting {
         incident: Vec3::new(0.2, 1., -0.2),
         ambient_brightness: 0.8,
-        distance: 30,
+        distance: 2000,
     };
     let white = Material {
         color: Rgba([255, 255, 255, 255]),
-        shininess: 2,
+        shininess: 7,
         reflection_brightness: 1.,
     };
     let black = Material {
         color: Rgba([0, 0, 0, 255]),
-        shininess: 2,
+        shininess: 7,
         reflection_brightness: 1.,
+    };
+    let blue = Material {
+        color: Rgba([179, 220, 214, 255]),
+        shininess: 4,
+        reflection_brightness: 0.2,
+        ..white
     };
 
     let rim = Corn {
@@ -332,32 +338,28 @@ fn main() {
         border_radius: 40.,
         depth: -40.,
     }
-    .with(white.clone());
+    .with(blue.clone());
     let trace = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(250., 100.),
         border_radius: 25.,
         depth: 25.,
     }
-    .with(white.clone());
-    let blue = Material {
-        color: Rgba([179, 220, 214, 255]),
-        ..black
-    };
+    .with(blue.clone());
     let slider = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(150., 100.),
         border_radius: 20.,
         depth: -20.,
     }
-    .with(blue.clone());
+    .with(black.clone());
     let top = RoundBox {
         top_left: point(50., 100.),
         bottom_right: point(150., 100.),
         border_radius: 15.,
         depth: 5.,
     }
-    .with(blue.clone());
+    .with(black.clone());
     let tips = (-1..=1)
         .into_iter()
         .map(|i| RoundBox {
@@ -367,7 +369,7 @@ fn main() {
             depth: -4.,
         })
         .collect::<Vec<_>>()
-        .with(blue.clone());
+        .with(black.clone());
     let mut img = RgbaImage::new(300, 200);
     rim.draw(&setting, &mut img);
     trace.draw(&setting, &mut img);
